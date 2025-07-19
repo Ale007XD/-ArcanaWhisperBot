@@ -3,7 +3,7 @@ name: Deploy Telegram Bot to VPS
 on:
   push:
     branches:
-      - main  # Запускать при push в ветку main
+      - main
 
 jobs:
   deploy:
@@ -29,33 +29,35 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USERNAME }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
           PROJECT_PATH: ${{ secrets.PROJECT_PATH }}
+          REPO_URL: "git@github.com:${{ github.repository }}.git" # URL для клонирования через SSH
         run: |
           ssh -o StrictHostKeyChecking=no ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "
-            # Переходим в директорию проекта (или создаем, если ее нет)
-            mkdir -p ${PROJECT_PATH} && cd ${PROJECT_PATH}
+            set -e # Прерывать выполнение при любой ошибке
 
-            # Останавливаем и удаляем старый контейнер, если он существует
-            if [ \$(docker ps -q -f name=arcane_keeper_bot) ]; then
-              echo 'Stopping and removing old container...'
-              docker-compose down
-            fi
+            echo 'Navigating to project directory...'
+            mkdir -p ${PROJECT_PATH}
+            cd ${PROJECT_PATH}
 
-            # Получаем последние изменения из репозитория
-            # Проверяем, существует ли .git, если нет - клонируем
+            echo 'Stopping old container if it exists...'
+            # Используем docker compose down, он безопасно обработает отсутствие контейнера
+            docker compose down
+
+            echo 'Pulling latest code...'
             if [ ! -d .git ]; then
-              echo 'Cloning repository...'
-              git clone https://github.com/${{ github.repository }}.git .
+              # Используйте SSH URL для приватных репозиториев (требует Deploy Key)
+              # Для публичных можно оставить https://github.com/${{ github.repository }}.git
+              git clone ${{ env.REPO_URL }} .
             else
-              echo 'Pulling latest changes...'
-              git pull origin main
+              git fetch origin main
+              git reset --hard origin/main
             fi
 
-            # Собираем новый образ и запускаем контейнер в фоновом режиме
             echo 'Building and starting new container...'
-            docker-compose up --build -d
-            
-            # Удаляем "висящие" образы, чтобы не занимать место
-            docker image prune -f
-            
+            # Используем 'docker compose' (v2)
+            docker compose up --build -d
+
+            echo 'Cleaning up old images...'
+            docker image prune -af
+
             echo 'Deployment finished successfully!'
           "
