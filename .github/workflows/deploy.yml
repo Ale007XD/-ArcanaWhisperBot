@@ -32,20 +32,17 @@ jobs:
           REPO_URL: "git@github.com:${{ github.repository }}.git" # URL для клонирования через SSH
         run: |
           ssh -o StrictHostKeyChecking=no ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "
-            set -e # Прерывать выполнение при любой ошибке
+            set -e
 
             echo 'Navigating to project directory...'
-            mkdir -p ${PROJECT_PATH}
-            cd ${PROJECT_PATH}
+            cd ${{ secrets.PROJECT_PATH }} || mkdir -p ${{ secrets.PROJECT_PATH }} && cd ${{ secrets.PROJECT_PATH }}
 
             echo 'Stopping old container if it exists...'
-            # Используем docker compose down, он безопасно обработает отсутствие контейнера
-            docker compose down
+            # ИЗМЕНЕНИЕ №1: используем docker-compose
+            docker-compose down
 
             echo 'Pulling latest code...'
             if [ ! -d .git ]; then
-              # Используйте SSH URL для приватных репозиториев (требует Deploy Key)
-              # Для публичных можно оставить https://github.com/${{ github.repository }}.git
               git clone ${{ env.REPO_URL }} .
             else
               git fetch origin main
@@ -53,11 +50,11 @@ jobs:
             fi
 
             echo 'Building and starting new container...'
-            # Используем 'docker compose' (v2)
-            docker compose up --build -d
-
+            # ИЗМЕНЕНИЕ №2: используем docker-compose
+            docker-compose up --build -d
+            
             echo 'Cleaning up old images...'
             docker image prune -af
-
+            
             echo 'Deployment finished successfully!'
           "
