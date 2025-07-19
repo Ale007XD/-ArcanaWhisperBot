@@ -1,5 +1,7 @@
+# Название рабочего процесса, отображаемое в GitHub Actions
 name: Deploy Telegram Bot to VPS
 
+# Условие запуска: при любом push в ветку 'main'
 on:
   push:
     branches:
@@ -7,54 +9,76 @@ on:
 
 jobs:
   deploy:
+    # Запускаем на последней версии Ubuntu
     runs-on: ubuntu-latest
 
     steps:
+      # Шаг 1: Клонирование вашего репозитория в рабочую область Actions
+      # Это нужно, чтобы Actions имел доступ к файлам, но не влияет на деплой
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Шаг 2: Настройка SSH-агента для безопасного подключения к вашему VPS
       - name: Setup SSH
         uses: webfactory/ssh-agent@v0.9.0
         with:
+          # Используем приватный SSH-ключ из секретов GitHub
           ssh-private-key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
 
+      # Шаг 3: Добавление хоста вашего VPS в список известных хостов
+      # Это предотвращает интерактивные запросы о доверии хосту
       - name: Add SSH host
         run: |
           mkdir -p ~/.ssh
           ssh-keyscan -H ${{ secrets.VPS_HOST }} >> ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
 
+      # Шаг 4: Основной шаг развертывания на сервере
       - name: Deploy to VPS
         env:
+          # Передаем секреты как переменные окружения для использования в скрипте
           VPS_USER: ${{ secrets.VPS_USERNAME }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
           PROJECT_PATH: ${{ secrets.PROJECT_PATH }}
-          REPO_URL: "git@github.com:${{ github.repository }}.git" # URL для клонирования через SSH
+          # Формируем SSH-совместимый URL для клонирования (важно для приватных репозиториев)
+          REPO_URL: "git@github.com:${{ github.repository }}.git"
         run: |
+          # Выполняем набор команд на удаленном сервере по SSH
           ssh -o StrictHostKeyChecking=no ${{ env.VPS_USER }}@${{ env.VPS_HOST }} "
+            # Прерывать выполнение скрипта при любой ошибке
             set -e
 
-            echo 'Navigating to project directory...'
-            cd ${{ secrets.PROJECT_PATH }} || mkdir -p ${{ secrets.PROJECT_PATH }} && cd ${{ secrets.PROJECT_PATH }}
+            echo '>>> Navigating to project directory...'
+            # Создаем директорию проекта, если она не существует
+            mkdir -p ${{ secrets.PROJECT_PATH }}
+            cd ${{ secrets.PROJECT_PATH }}
 
-            echo 'Stopping old container if it exists...'
-            # ИЗМЕНЕНИЕ №1: используем docker-compose
-            docker-compose down
-
-            echo 'Pulling latest code...'
-            if [ ! -d .git ]; then
+            # ПРАВИЛЬНЫЙ ПОРЯДОК: Сначала получаем код
+            echo '>>> Pulling latest code...'
+            # Проверяем, был ли репозиторий уже клонирован
+            if [ ! -d .git ] ; then
+              echo '   Cloning repository for the first time...'
               git clone ${{ env.REPO_URL }} .
             else
+              echo '   Repository exists. Fetching latest changes...'
+              # Сбрасываем любые локальные изменения и обновляемся до последней версии из ветки main
               git fetch origin main
               git reset --hard origin/main
             fi
 
-            echo 'Building and starting new container...'
-            # ИЗМЕНЕНИЕ №2: используем docker-compose
+            # Теперь, когда docker-compose.yml на месте, останавливаем старые контейнеры
+            echo '>>> Stopping old containers if they exist...'
+            # Используем docker-compose с дефисом. Флаг --volumes удаляет старые тома.
+            docker-compose down --volumes
+
+            # Собираем и запускаем новый образ
+            echo '>>> Building and starting new container...'
+            # --build форсирует пересборку образа, -d запускает в фоновом режиме
             docker-compose up --build -d
             
-            echo 'Cleaning up old images...'
+            # Очищаем систему от неиспользуемых (висящих) Docker-образов
+            echo '>>> Cleaning up old images...'
             docker image prune -af
             
-            echo 'Deployment finished successfully!'
+            echo '>>> Deployment finished successfully!'
           "
