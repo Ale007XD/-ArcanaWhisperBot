@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  telegram-bot:
+    build: .
+    container_name: arcane_keeper_bot
+    # Политика перезапуска контейнера в случае сбоя
+    restart: always
+    # Указываем файл .env для загрузки переменных окружения
+    env_file:
+      - .env
